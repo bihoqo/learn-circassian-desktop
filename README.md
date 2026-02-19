@@ -6,18 +6,45 @@ Built with **Electron 34**, **React 18**, **electron-vite 5**, **Tailwind CSS v4
 
 ---
 
+## How It Works
+
+The app is fully offline. The only time it needs an internet connection is the **one-time database download** on first launch.
+
+### First launch
+
+When you open the app for the first time, it checks whether the dictionary database exists locally. If not, it shows a setup screen:
+
+- **Automatic download** — click "Download Dictionary (~242 MB)" and the app streams the database directly from [GitHub Releases](https://github.com/bihoqo/learn-circassian-dictionary-collection/releases/latest). A progress bar shows the download status.
+- **Manual install** — if you prefer, the setup screen shows the exact file path where the database should be placed, with a Copy button and an OS-native "Open folder" button (Show in Finder / Open in Explorer / Open in Files) to navigate there directly.
+
+Once the database is in place the app opens immediately — no restart needed.
+
+### After setup
+
+All dictionary lookups run locally via SQLite (`better-sqlite3` in the Electron main process). The renderer never touches the database directly; it calls the main process through a typed IPC bridge (`window.electronAPI`).
+
+- **Search** — type in the left panel. Supports "Starts with" and "Contains" modes, paginated 50 results at a time.
+- **Word detail** — click a result to open its entry in the right panel. Multiple words can be open in tabs simultaneously. Each entry is rendered HTML from the source dictionary.
+- **Language filters** — narrow results by source or target language.
+- **Virtual keyboard** — 5 layouts (Circassian, Russian, Turkish, Arabic, English) with shift toggle. Inserts characters at the cursor position in the search field.
+
+### Settings
+
+Click the gear icon (⚙) in the top-right corner to open Settings. It shows the full path where the database is stored on your machine, with buttons to copy the path or open the folder in your file manager. If you delete the database file, the app will detect this on the next search or when you return from Settings, and redirect you back to the setup screen.
+
+---
+
 ## Features
 
-- **Offline-first** — the database is downloaded once on first launch; no network needed after that
+- **Offline-first** — database downloaded once on first launch; no network needed after that
 - **35+ dictionaries** — Circassian paired with Russian, English, Turkish, Arabic, and more
 - **Two-panel layout** — search + keyboard on the left, word detail on the right
-- **Virtual keyboard** — 5 layouts (Circassian, Russian, Turkish, Arabic, English) with shift toggle; collapsible
-- **Cursor-aware key insertion** — virtual keyboard inserts at the cursor position in the search field
+- **Virtual keyboard** — 5 layouts with shift toggle; collapsible
 - **Two search modes** — "Starts with" and "Contains" (3+ chars)
 - **Paginated results** — 50 results per page with a "Show more" button
-- **Word detail view** — expandable cards per dictionary entry (rendered HTML), language filters
-- **Dark / light mode** — toggle in the header, persisted across sessions via localStorage
-- **Cross-platform** — builds to `.dmg` (macOS), `.exe` NSIS installer (Windows), `.AppImage` (Linux)
+- **Word detail view** — expandable cards per dictionary entry, language filters
+- **Dark / light mode** — toggle in the header, persisted across sessions
+- **Cross-platform** — Windows, macOS, Linux
 
 ---
 
@@ -53,27 +80,19 @@ This runs three steps:
 2. `electron-rebuild -f -w better-sqlite3` — downloads the prebuilt binary for Electron 34
 3. `bun run db:download` — downloads `dictionary.db` from GitHub Releases
 
-Or run the steps individually:
-
-```bash
-bun install --ignore-scripts
-bun run rebuild:native
-bun run db:download
-```
-
 ### 3. Start in development mode
 
 ```bash
 bun run dev
 ```
 
-The Electron window opens with hot-reload for the renderer and auto-restart for the main process. On first launch the app shows a **"Download Dictionary"** screen if the database hasn't been downloaded yet — click the button to download it. Alternatively, run `bun run db:download` beforehand.
+The Electron window opens with hot-reload for the renderer and auto-restart for the main process.
 
 ---
 
 ## Dictionary Database
 
-The 242 MB SQLite database is **not bundled** in the repository. It is downloaded at runtime on first launch from:
+The 242 MB SQLite database is **not bundled** in the repository or the installer. It is downloaded on first launch (or via `bun run db:download`) from:
 
 ```
 https://github.com/bihoqo/learn-circassian-dictionary-collection/releases/latest/download/dictionary.db
@@ -86,10 +105,8 @@ bun run db:download
 # places the file at: resources/dictionary.db
 ```
 
-Re-running is a no-op if the file already exists.
-
 In **development mode**, the app looks for the database at `resources/dictionary.db`.
-In **production (packaged)**, the database is bundled with the installer.
+In **production (packaged)**, the database is stored in the app's user-data directory and downloaded on first launch — it is not included in the installer.
 
 ---
 
@@ -105,11 +122,11 @@ Runs `electron-vite build` then `electron-builder`. Output is placed in `dist/`.
 
 ### Platform outputs
 
-| Platform | Output file |
-|----------|-------------|
-| **macOS** | `dist/Learn Circassian Desktop-x.x.x.dmg` |
-| **Windows** | `dist/Learn Circassian Desktop Setup x.x.x.exe` |
-| **Linux** | `dist/Learn Circassian Desktop-x.x.x.AppImage` |
+| Platform | Installer | Portable |
+|----------|-----------|---------|
+| **macOS** | `Learn Circassian Desktop x.x.x macOS.dmg` | `Learn Circassian Desktop x.x.x macOS Portable.zip` |
+| **Windows** | `Learn Circassian Desktop Setup x.x.x Windows.exe` | `Learn Circassian Desktop x.x.x Windows Portable.zip` |
+| **Linux** | — | `Learn Circassian Desktop x.x.x Linux.AppImage` |
 
 ### GitHub Actions (CI/CD)
 
@@ -143,7 +160,7 @@ learn-circassian-desktop/
 │   └── renderer/
 │       ├── index.html
 │       └── src/
-│           ├── App.tsx        # Root: two-panel layout, SetupScreen (first-run download)
+│           ├── App.tsx        # Root: SetupScreen, SettingsScreen, two-panel dictionary UI
 │           ├── env.d.ts       # Window.electronAPI type declarations
 │           ├── lib/
 │           │   ├── consts.ts  # Keyboard layouts, LANGUAGE_DISPLAY_MAP, toPalochka
@@ -153,55 +170,8 @@ learn-circassian-desktop/
 │           └── components/    # SearchInput, SearchResultsList, WordEntryCard, etc.
 ├── electron.vite.config.ts
 ├── tsconfig.json
-├── tsconfig.node.json
 └── package.json
 ```
-
----
-
-## Architecture
-
-### IPC Design
-
-```typescript
-// Exposed in renderer as window.electronAPI
-window.electronAPI.searchWords({ query, mode, page, limit })
-// → Promise<{ data: string[], page: number, totalPages: number }>
-
-window.electronAPI.getWord(word)
-// → Promise<IWordWithDictionaries | null>
-
-window.electronAPI.downloadDb()
-// → Promise<{ ok: true }>  (streams DB from GitHub Releases, sends progress events)
-
-window.electronAPI.onDownloadProgress(cb)
-// → unsubscribe function
-```
-
-### Database
-
-| Table | Columns | Description |
-|-------|---------|-------------|
-| `dictionaries` | `id`, `title`, `from_lang`, `to_lang` | One row per dictionary source |
-| `words` | `word` (PK), `entries` (JSON) | One row per headword; entries = `[{id, html}, …]` |
-
-### Palochka Convention
-
-The Circassian palochka (Ӏ, U+04C0) is stored as `1` in the database:
-
-- **`toPalochka(text)`** — `1` → `Ӏ` for display (`src/renderer/src/lib/consts.ts`)
-- **`normalizeQuery(q)`** — `Ӏ` → `1` before querying (`useDictionarySearch.ts`)
-
-### Tailwind CSS v4
-
-Uses `@tailwindcss/vite` (no `tailwind.config.js` needed). Dark mode via custom variant:
-
-```css
-@import "tailwindcss";
-@custom-variant dark (&:where(.dark, .dark *));
-```
-
-The `dark` class is toggled on `<html>` in `App.tsx`.
 
 ---
 
@@ -218,18 +188,6 @@ The `dark` class is toggled on `<html>` in `App.tsx`.
 
 ---
 
-## Testing
-
-Uses Bun's built-in test runner:
-
-```bash
-bun test
-```
-
-Tests live in `__tests__/` directories next to the code they test.
-
----
-
 ## Troubleshooting
 
 ### `Error: Cannot find module 'better-sqlite3'`
@@ -237,7 +195,7 @@ Tests live in `__tests__/` directories next to the code they test.
 bun run rebuild:native
 ```
 
-### `Error: Database not found` on startup
+### Database not found on startup
 ```bash
 bun run db:download
 ```
