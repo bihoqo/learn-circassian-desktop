@@ -1,0 +1,90 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  # ── Pre-create the GitHub Release so all 3 build jobs upload concurrently ─────
+  # Without this, the jobs race to create+finalise the same release and the
+  # GitHub API rejects concurrent finalisations ("Too many retries").
+  create-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: "Release ${{ github.ref_name }}"
+          draft: false
+          generate_release_notes: false
+
+  # ── Build on all three platforms in parallel ──────────────────────────────────
+  build:
+    needs: create-release
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux
+          - os: macos-latest
+            platform: mac
+          - os: windows-latest
+            platform: win
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: bun install --ignore-scripts
+
+      - name: Rebuild native modules
+        run: bun run rebuild:native
+
+      # Build renderer + main, then package into platform installers.
+      # GH_TOKEN is required by electron-builder when it detects a git tag,
+      # even with --publish never.
+      - name: Build and package
+        run: bun x electron-vite build && bun x electron-builder --publish never
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      # Rename *.zip → "* Portable.zip" so the download page is unambiguous
+      - name: Mark portable archives (macOS / Linux)
+        if: runner.os != 'Windows'
+        run: |
+          for f in dist/*.zip; do
+            [ -f "$f" ] || continue
+            mv "$f" "${f%.zip} Portable.zip"
+          done
+
+      - name: Mark portable archives (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Get-ChildItem dist\*.zip | Rename-Item -NewName { $_.Name -replace '\.zip$', ' Portable.zip' }
+
+      # Upload only this platform's artifacts to the already-created release
+      - name: Upload release artifacts
+        uses: softprops/action-gh-release@v2
+        with:
+          fail_on_unmatched_files: false
+          files: |
+            dist/*.dmg
+            dist/*.exe
+            dist/*.AppImage
+            dist/*.zip

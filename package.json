@@ -1,0 +1,63 @@
+{
+  "name": "learn-circassian-desktop",
+  "version": "0.3.0",
+  "description": "Offline Circassian dictionary desktop app",
+  "main": "out/main/index.js",
+  "scripts": {
+    "setup": "bun install --ignore-scripts && bun run rebuild:native && bun run db:download",
+    "db:download": "node scripts/download-db.mjs",
+    "rebuild:native": "electron-rebuild -f -w better-sqlite3",
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "package": "electron-vite build && electron-builder",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.0.0",
+    "better-sqlite3": "^11.0.0",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
+    "use-debounce": "^10.0.0",
+    "zustand": "^5.0.0"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^4.0.3",
+    "@tailwindcss/vite": "^4.0.0",
+    "@types/better-sqlite3": "^7.6.0",
+    "@types/node": "^20.0.0",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "electron": "^34.0.0",
+    "electron-builder": "^25.0.0",
+    "electron-vite": "5.0.0",
+    "lucide-react": "^0.475.0",
+    "tailwindcss": "^4.0.0",
+    "typescript": "^5.7.0"
+  },
+  "packageManager": "bun@1.3.9",
+  "build": {
+    "appId": "com.learncircassian.desktop",
+    "productName": "Learn Circassian Desktop",
+    "icon": "resources/icon.png",
+    "directories": {
+      "output": "dist"
+    },
+    "mac": {
+      "target": ["dmg", "zip"],
+      "artifactName": "${productName} ${version} macOS.${ext}"
+    },
+    "win": {
+      "target": ["nsis", "zip"],
+      "artifactName": "${productName} ${version} Windows.${ext}"
+    },
+    "nsis": {
+      "artifactName": "${productName} Setup ${version} Windows.${ext}"
+    },
+    "linux": {
+      "target": ["AppImage"],
+      "artifactName": "${productName} ${version} Linux.${ext}"
+    }
+  }
+}

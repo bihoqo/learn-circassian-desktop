@@ -1,0 +1,18 @@
+node_modules/
+out/
+dist/
+.DS_Store
+*.log
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.p8
+
+# The assembled database file (242 MB) is NOT committed.
+# It is built from the three committed chunks in resources/db/ by running:
+#   bun run db:assemble  (or: bun run setup)
+# The chunks (resources/db/dictionary.db.part*) ARE committed to git.
+resources/dictionary.db
+/.idea/
