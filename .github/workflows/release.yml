@@ -2,6 +2,7 @@ name: Build & Release
 
 on:
   push:
+    branches: [main]
     tags:
       - "v*"
   workflow_dispatch:
@@ -10,10 +11,10 @@ permissions:
   contents: write
 
 jobs:
-  # ── Pre-create the GitHub Release so all 3 build jobs upload concurrently ─────
-  # Without this, the jobs race to create+finalise the same release and the
-  # GitHub API rejects concurrent finalisations ("Too many retries").
+  # Only runs on tag pushes — pre-creates the release so all 3 build jobs
+  # can upload concurrently without racing to finalise the same release.
   create-release:
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
       - uses: softprops/action-gh-release@v2
@@ -22,9 +23,10 @@ jobs:
           draft: false
           generate_release_notes: false
 
-  # ── Build on all three platforms in parallel ──────────────────────────────────
+  # Runs on every push to main (CI check) and on tag pushes (release build).
   build:
     needs: create-release
+    if: always() && (needs.create-release.result == 'success' || needs.create-release.result == 'skipped')
     strategy:
       matrix:
         include:
@@ -54,18 +56,15 @@ jobs:
       - name: Rebuild native modules
         run: bun run rebuild:native
 
-      # Build renderer + main, then package into platform installers.
-      # GH_TOKEN is required by electron-builder when it detects a git tag,
-      # even with --publish never.
       - name: Build and package
         run: bun x electron-vite build && bun x electron-builder --publish never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
-      # Rename *.zip → "* Portable.zip" so the download page is unambiguous
+      # Rename steps and upload only run on tag pushes
       - name: Mark portable archives (macOS / Linux)
-        if: runner.os != 'Windows'
+        if: startsWith(github.ref, 'refs/tags/') && runner.os != 'Windows'
         run: |
           for f in dist/*.zip; do
             [ -f "$f" ] || continue
@@ -73,13 +72,13 @@ jobs:
           done
 
       - name: Mark portable archives (Windows)
-        if: runner.os == 'Windows'
+        if: startsWith(github.ref, 'refs/tags/') && runner.os == 'Windows'
         shell: pwsh
         run: |
           Get-ChildItem dist\*.zip | Rename-Item -NewName { $_.Name -replace '\.zip$', ' Portable.zip' }
 
-      # Upload only this platform's artifacts to the already-created release
       - name: Upload release artifacts
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           fail_on_unmatched_files: false
