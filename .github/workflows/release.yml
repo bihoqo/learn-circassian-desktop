@@ -3,30 +3,33 @@ name: Build & Release
 on:
   push:
     branches: [main]
-    tags:
-      - "v*"
   workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  # Only runs on tag pushes — pre-creates the release so all 3 build jobs
-  # can upload concurrently without racing to finalise the same release.
+  # Delete the existing "latest" release and tag, then recreate it empty so
+  # all three build jobs can upload their assets concurrently without racing.
   create-release:
-    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
+      - name: Delete previous latest release and tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete latest --repo ${{ github.repository }} --yes 2>/dev/null || true
+          gh api -X DELETE repos/${{ github.repository }}/git/refs/tags/latest 2>/dev/null || true
+
       - uses: softprops/action-gh-release@v2
         with:
-          name: "Release ${{ github.ref_name }}"
+          tag_name: latest
+          name: "Latest Build"
           draft: false
           generate_release_notes: false
 
-  # Runs on every push to main (CI check) and on tag pushes (release build).
   build:
     needs: create-release
-    if: always() && (needs.create-release.result == 'success' || needs.create-release.result == 'skipped')
     strategy:
       matrix:
         include:
@@ -62,9 +65,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
-      # Rename steps and upload only run on tag pushes
       - name: Mark portable archives (macOS / Linux)
-        if: startsWith(github.ref, 'refs/tags/') && runner.os != 'Windows'
+        if: runner.os != 'Windows'
         run: |
           for f in dist/*.zip; do
             [ -f "$f" ] || continue
@@ -72,15 +74,15 @@ jobs:
           done
 
       - name: Mark portable archives (Windows)
-        if: startsWith(github.ref, 'refs/tags/') && runner.os == 'Windows'
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           Get-ChildItem dist\*.zip | Rename-Item -NewName { $_.Name -replace '\.zip$', ' Portable.zip' }
 
       - name: Upload release artifacts
-        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: latest
           fail_on_unmatched_files: false
           files: |
             dist/*.dmg
